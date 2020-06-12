@@ -1,59 +1,57 @@
-const express = require('express');
-const fetch = require('node-fetch');
-const redis = require('redis');
-
-const PORT = process.env.PORT || 5000;
-const REDIS_PORT = process.env.PORT || 6379;
-
-const client = redis.createClient(REDIS_PORT);
-
-const app = express();
-
-// Set response
-function setResponse(username, repos) {
-  return `<h2>${username} has ${repos} Github repos</h2>`;
-}
-
-// Make request to Github for data
-async function getRepos(req, res, next) {
-  try {
-    console.log('Fetching Data...');
-
-    const { username } = req.params;
-
-    const response = await fetch(`https://api.github.com/users/${username}`);
-
-    const data = await response.json();
-
-    const repos = data.public_repos;
-
-    // Set data to Redis
-    client.setex(username, 3600, repos);
-
-    res.send(setResponse(username, repos));
-  } catch (err) {
-    console.error(err);
-    res.status(500);
-  }
-}
-
-// Cache middleware
-function cache(req, res, next) {
-  const { username } = req.params;
-
-  client.get(username, (err, data) => {
-    if (err) throw err;
-
-    if (data !== null) {
-      res.send(setResponse(username, data));
-    } else {
-      next();
-    }
-  });
-}
-
-app.get('/repos/:username', cache, getRepos);
-
-app.listen(5000, () => {
-  console.log(`App listening on port ${PORT}`);
+const express = require('express')
+const fetch = require("node-fetch");
+const redis = require('redis')
+ 
+// create express application instance
+const app = express()
+ 
+// create and connect redis client to local instance.
+const client = redis.createClient(6379)
+ 
+// echo redis errors to the console
+client.on('error', (err) => {
+    console.log("Error " + err)
+});
+ 
+// get photos list
+app.get('/photos', (req, res) => {
+ 
+    // key to store results in Redis store
+    const photosRedisKey = 'user:photos';
+ 
+    // Try fetching the result from Redis first in case we have it cached
+    return client.get(photosRedisKey, (err, photos) => {
+ 
+        // If that key exists in Redis store
+        if (photos) {
+ 
+            return res.json({ source: 'cache', data: JSON.parse(photos) })
+ 
+        } else { // Key does not exist in Redis store
+ 
+            // Fetch directly from remote api
+            fetch('https://jsonplaceholder.typicode.com/photos')
+                .then(response => response.json())
+                .then(photos => {
+ 
+                    // Save the  API response in Redis store,  data expire time in 3600 seconds, it means one hour
+                    client.setex(photosRedisKey, 3600, JSON.stringify(photos))
+ 
+                    // Send JSON response to client
+                    return res.json({ source: 'api', data: photos })
+ 
+                })
+                .catch(error => {
+                    // log error message
+                    console.log(error)
+                    // send error to the client 
+                    return res.json(error.toString())
+                })
+        }
+    });
+});
+ 
+// start express server at 3000 port
+app.listen(3000, () => {
+    console.log('Server listening on port: ', 3000)
 });
